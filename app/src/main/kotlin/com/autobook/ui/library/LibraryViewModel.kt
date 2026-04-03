@@ -75,6 +75,9 @@ class LibraryViewModel(
     private val _selectedCoverBitmap = MutableStateFlow<Bitmap?>(null)
     val selectedCoverBitmap: StateFlow<Bitmap?> = _selectedCoverBitmap
 
+    private val _coverDownloading = MutableStateFlow(false)
+    val coverDownloading: StateFlow<Boolean> = _coverDownloading
+
     private val fetcher = CoverArtFetcher(context)
 
     fun searchCovers(book: BookEntity) {
@@ -82,6 +85,7 @@ class LibraryViewModel(
             _coverSearchLoading.value = true
             _coverSearchResults.value = emptyList()
             _selectedCoverBitmap.value = null
+            _coverDownloading.value = false
             try {
                 val results = fetcher.searchCovers(book.title, book.author)
                 _coverSearchResults.value = results
@@ -95,8 +99,15 @@ class LibraryViewModel(
 
     fun selectCoverForCrop(cover: CoverResult) {
         viewModelScope.launch {
-            val bitmap = fetcher.downloadBitmap(cover.url)
-            _selectedCoverBitmap.value = bitmap
+            _coverDownloading.value = true
+            try {
+                val bitmap = fetcher.downloadBitmap(cover.url)
+                _selectedCoverBitmap.value = bitmap
+            } catch (e: Exception) {
+                _selectedCoverBitmap.value = null
+            } finally {
+                _coverDownloading.value = false
+            }
         }
     }
 
@@ -104,6 +115,11 @@ class LibraryViewModel(
         _coverSearchResults.value = emptyList()
         _selectedCoverBitmap.value = null
         _coverSearchLoading.value = false
+        _coverDownloading.value = false
+    }
+
+    fun clearSelectedBitmap() {
+        _selectedCoverBitmap.value = null
     }
 
     fun reSearchCover(book: BookEntity) {

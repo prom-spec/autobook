@@ -55,9 +55,11 @@ import kotlin.math.roundToInt
 fun CoverPickerDialog(
     covers: List<CoverResult>,
     isLoading: Boolean,
+    isDownloading: Boolean,
     onSelectAndCrop: (CoverResult) -> Unit,
     onConfirmCropped: (Bitmap) -> Unit,
     selectedBitmap: Bitmap?,
+    onBackToGrid: () -> Unit,
     onDismiss: () -> Unit
 ) {
     if (selectedBitmap != null) {
@@ -65,13 +67,14 @@ fun CoverPickerDialog(
         CropPhase(
             sourceBitmap = selectedBitmap,
             onConfirm = onConfirmCropped,
-            onBack = { /* parent resets selectedBitmap */ onDismiss() }
+            onBack = onBackToGrid
         )
     } else {
         // Phase 1: Pick from grid
         PickPhase(
             covers = covers,
             isLoading = isLoading,
+            isDownloading = isDownloading,
             onSelect = onSelectAndCrop,
             onDismiss = onDismiss
         )
@@ -82,6 +85,7 @@ fun CoverPickerDialog(
 private fun PickPhase(
     covers: List<CoverResult>,
     isLoading: Boolean,
+    isDownloading: Boolean,
     onSelect: (CoverResult) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -116,7 +120,7 @@ private fun PickPhase(
 
                 Spacer(Modifier.height(8.dp))
 
-                if (isLoading) {
+                if (isLoading || isDownloading) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -124,7 +128,10 @@ private fun PickPhase(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CircularProgressIndicator(color = Amber)
                             Spacer(Modifier.height(12.dp))
-                            Text("Searching covers...", color = TextMuted)
+                            Text(
+                                if (isDownloading) "Loading cover..." else "Searching covers...",
+                                color = TextMuted
+                            )
                         }
                     }
                 } else if (covers.isEmpty()) {
@@ -201,9 +208,9 @@ private fun CropPhase(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val cropAspect = 2f / 3f
 
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    var scale by remember { mutableStateOf(1f) }
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
     var initialized by remember { mutableStateOf(false) }
 
     val cropRect = remember(canvasSize) {

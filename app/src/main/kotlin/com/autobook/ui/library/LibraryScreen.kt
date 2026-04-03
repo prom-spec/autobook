@@ -52,6 +52,7 @@ fun LibraryScreen(
     var coverPickBook by remember { mutableStateOf<BookEntity?>(null) }
     val coverSearchResults by viewModel.coverSearchResults.collectAsState()
     val coverSearchLoading by viewModel.coverSearchLoading.collectAsState()
+    val coverDownloading by viewModel.coverDownloading.collectAsState()
     val selectedCoverBitmap by viewModel.selectedCoverBitmap.collectAsState()
 
     val context = LocalContext.current
@@ -377,10 +378,11 @@ fun LibraryScreen(
 
     // Cover picker dialog (API search → select → crop)
     coverPickBook?.let { book ->
-        if (coverSearchLoading || coverSearchResults.isNotEmpty() || selectedCoverBitmap != null) {
+        if (coverSearchLoading || coverDownloading || coverSearchResults.isNotEmpty() || selectedCoverBitmap != null) {
             CoverPickerDialog(
                 covers = coverSearchResults,
                 isLoading = coverSearchLoading,
+                isDownloading = coverDownloading,
                 onSelectAndCrop = { cover -> viewModel.selectCoverForCrop(cover) },
                 onConfirmCropped = { croppedBitmap ->
                     viewModel.setCustomCover(book.id, croppedBitmap)
@@ -388,6 +390,7 @@ fun LibraryScreen(
                     coverPickBook = null
                 },
                 selectedBitmap = selectedCoverBitmap,
+                onBackToGrid = { viewModel.clearSelectedBitmap() },
                 onDismiss = {
                     viewModel.clearCoverSearch()
                     coverPickBook = null
