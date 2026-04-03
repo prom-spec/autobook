@@ -40,6 +40,8 @@ fun ImportScreen(
     var pickerLaunched by remember { mutableStateOf(false) }
     // Track whether we got a result back from the picker
     var pickerResultReceived by remember { mutableStateOf(false) }
+    // Track whether the activity paused (picker actually opened as overlay/activity)
+    var activityPaused by remember { mutableStateOf(false) }
 
     // Use */* so all files (including .bin) are visible in the picker
     val mimeTypes = arrayOf("*/*")
@@ -70,11 +72,14 @@ fun ImportScreen(
     }
 
     // Detect when activity resumes after picker closes without calling the callback
-    // (some Android versions/devices don't call the result on back press)
+    // Only triggers after ON_PAUSE was seen (so initial composition doesn't false-fire)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && pickerLaunched && !pickerResultReceived) {
+            if (event == Lifecycle.Event.ON_PAUSE && pickerLaunched) {
+                activityPaused = true
+            }
+            if (event == Lifecycle.Event.ON_RESUME && activityPaused && !pickerResultReceived) {
                 // Picker closed without giving us a result — user pressed back
                 onBack()
             }
