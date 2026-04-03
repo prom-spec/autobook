@@ -32,7 +32,30 @@ fun ImportScreen(
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let { viewModel.importBook(it) }
+        if (uri != null) {
+            viewModel.importBook(uri)
+        } else {
+            // User cancelled the file picker — go back to library
+            onBack()
+        }
+    }
+
+    // Auto-launch file picker on entry
+    var pickerLaunched by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!pickerLaunched) {
+            pickerLaunched = true
+            launcher.launch(arrayOf(
+                "application/pdf",
+                "application/epub+zip",
+                "application/x-mobipocket-ebook",
+                "application/x-fictionbook+xml",
+                "application/vnd.oasis.opendocument.text",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "text/plain",
+                "application/octet-stream"
+            ))
+        }
     }
 
     LaunchedEffect(importState) {
@@ -93,7 +116,7 @@ fun ImportScreen(
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            "Supports PDF and TXT files",
+                            "Supports EPUB, PDF, MOBI, DOCX, ODT, FB2, TXT",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextMuted,
                             textAlign = TextAlign.Center
