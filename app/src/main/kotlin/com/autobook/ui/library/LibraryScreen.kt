@@ -53,7 +53,7 @@ fun LibraryScreen(
     val coverSearchResults by viewModel.coverSearchResults.collectAsState()
     val coverSearchLoading by viewModel.coverSearchLoading.collectAsState()
     val coverDownloading by viewModel.coverDownloading.collectAsState()
-    val selectedCoverBitmap by viewModel.selectedCoverBitmap.collectAsState()
+    val coverSaved by viewModel.coverSaved.collectAsState()
 
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
@@ -376,21 +376,22 @@ fun LibraryScreen(
         )
     }
 
-    // Cover picker dialog (API search → select → crop)
+    // Auto-dismiss when cover is saved
+    LaunchedEffect(coverSaved) {
+        if (coverSaved != null) {
+            viewModel.clearCoverSearch()
+            coverPickBook = null
+        }
+    }
+
+    // Cover picker dialog (API search → tap to select)
     coverPickBook?.let { book ->
-        if (coverSearchLoading || coverDownloading || coverSearchResults.isNotEmpty() || selectedCoverBitmap != null) {
+        if (coverSearchLoading || coverDownloading || coverSearchResults.isNotEmpty()) {
             CoverPickerDialog(
                 covers = coverSearchResults,
                 isLoading = coverSearchLoading,
                 isDownloading = coverDownloading,
-                onSelectAndCrop = { cover -> viewModel.selectCoverForCrop(cover) },
-                onConfirmCropped = { croppedBitmap ->
-                    viewModel.setCustomCover(book.id, croppedBitmap)
-                    viewModel.clearCoverSearch()
-                    coverPickBook = null
-                },
-                selectedBitmap = selectedCoverBitmap,
-                onBackToGrid = { viewModel.clearSelectedBitmap() },
+                onSelect = { cover -> viewModel.selectCover(book.id, cover) },
                 onDismiss = {
                     viewModel.clearCoverSearch()
                     coverPickBook = null

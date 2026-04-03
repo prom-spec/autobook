@@ -72,11 +72,12 @@ class LibraryViewModel(
     private val _coverSearchLoading = MutableStateFlow(false)
     val coverSearchLoading: StateFlow<Boolean> = _coverSearchLoading
 
-    private val _selectedCoverBitmap = MutableStateFlow<Bitmap?>(null)
-    val selectedCoverBitmap: StateFlow<Bitmap?> = _selectedCoverBitmap
-
     private val _coverDownloading = MutableStateFlow(false)
     val coverDownloading: StateFlow<Boolean> = _coverDownloading
+
+    // Set to bookId when cover was just saved, so UI can dismiss
+    private val _coverSaved = MutableStateFlow<String?>(null)
+    val coverSaved: StateFlow<String?> = _coverSaved
 
     private val fetcher = CoverArtFetcher(context)
 
@@ -84,8 +85,8 @@ class LibraryViewModel(
         viewModelScope.launch {
             _coverSearchLoading.value = true
             _coverSearchResults.value = emptyList()
-            _selectedCoverBitmap.value = null
             _coverDownloading.value = false
+            _coverSaved.value = null
             try {
                 val results = fetcher.searchCovers(book.title, book.author)
                 _coverSearchResults.value = results
@@ -97,14 +98,19 @@ class LibraryViewModel(
         }
     }
 
-    fun selectCoverForCrop(cover: CoverResult) {
+    fun selectCover(bookId: String, cover: CoverResult) {
         viewModelScope.launch {
             _coverDownloading.value = true
             try {
                 val bitmap = fetcher.downloadBitmap(cover.url)
-                _selectedCoverBitmap.value = bitmap
+                if (bitmap != null) {
+                    val scaled = Bitmap.createScaledBitmap(bitmap, 400, 600, true)
+                    val path = fetcher.saveCoverBitmap(scaled, bookId)
+                    repository.updateCoverPath(bookId, path)
+                    _coverSaved.value = bookId
+                }
             } catch (e: Exception) {
-                _selectedCoverBitmap.value = null
+                // Failed to download, stay on grid
             } finally {
                 _coverDownloading.value = false
             }
@@ -113,13 +119,9 @@ class LibraryViewModel(
 
     fun clearCoverSearch() {
         _coverSearchResults.value = emptyList()
-        _selectedCoverBitmap.value = null
         _coverSearchLoading.value = false
         _coverDownloading.value = false
-    }
-
-    fun clearSelectedBitmap() {
-        _selectedCoverBitmap.value = null
+        _coverSaved.value = null
     }
 
     fun reSearchCover(book: BookEntity) {
