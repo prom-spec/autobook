@@ -1,6 +1,7 @@
 package com.autobook.ui.import_
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -29,9 +30,18 @@ fun ImportScreen(
 ) {
     val importState by viewModel.importState.collectAsState()
 
+    // Back button always goes back to library
+    BackHandler { onBack() }
+
+    // Auto-launch file picker on entry
+    var pickerLaunched by remember { mutableStateOf(false) }
+    // Track whether we got a result back from the picker
+    var pickerResultReceived by remember { mutableStateOf(false) }
+
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
+        pickerResultReceived = true
         if (uri != null) {
             viewModel.importBook(uri)
         } else {
@@ -39,9 +49,6 @@ fun ImportScreen(
             onBack()
         }
     }
-
-    // Auto-launch file picker on entry
-    var pickerLaunched by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!pickerLaunched) {
             pickerLaunched = true
@@ -55,6 +62,13 @@ fun ImportScreen(
                 "text/plain",
                 "application/octet-stream"
             ))
+        }
+    }
+
+    // If picker was launched but user cancelled (returned to ImportScreen idle), go back
+    LaunchedEffect(pickerResultReceived, importState) {
+        if (pickerLaunched && pickerResultReceived && importState is ImportState.Idle) {
+            onBack()
         }
     }
 
