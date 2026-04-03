@@ -136,6 +136,9 @@ class PlayerViewModel(
                 _currentChapter.value = chapter
                 Log.d(TAG, "Current chapter: ${chapter?.title}")
 
+                // Set book info for notification (cover art + title)
+                playbackService?.setBookInfo(book.title, book.coverPath)
+
                 chapter?.let {
                     if (serviceBound && playbackService != null) {
                         playbackService?.loadChapter(it, book.currentCharOffset)

@@ -8,13 +8,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.BitmapFactory
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.speech.tts.UtteranceProgressListener
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
+import com.autobook.MainActivity
 import com.autobook.R
 import com.autobook.data.db.ChapterEntity
 import com.autobook.domain.chapter.ContentCleaner
@@ -44,6 +47,8 @@ class PlaybackService : Service() {
     }
 
     private var currentChapter: ChapterEntity? = null
+    private var currentBookTitle: String? = null
+    private var currentCoverPath: String? = null
     private var sentences: List<String> = emptyList()
     private var currentSentenceIndex = 0
     private var playbackSpeed = 1.0f
@@ -179,6 +184,8 @@ class PlaybackService : Service() {
         sentences = contentCleaner.splitIntoSentences(chapter.textContent)
         currentSentenceIndex = startSentence
         _currentPosition.value = startSentence
+        updateMediaMetadata()
+        updateNotification()
     }
 
     fun play() {
@@ -287,35 +294,84 @@ class PlaybackService : Service() {
         mediaSession.setPlaybackState(stateBuilder.build())
     }
 
+    fun setBookInfo(title: String?, coverPath: String?) {
+        currentBookTitle = title
+        currentCoverPath = coverPath
+        updateMediaMetadata()
+    }
+
+    private fun updateMediaMetadata() {
+        val metadataBuilder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentChapter?.title ?: "")
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentBookTitle ?: "AIAnyBook")
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentBookTitle ?: "AIAnyBook")
+
+        // Load cover art
+        currentCoverPath?.let { path ->
+            try {
+                val bitmap = BitmapFactory.decodeFile(path)
+                if (bitmap != null) {
+                    metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bitmap)
+                    metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, bitmap)
+                }
+            } catch (_: Exception) {}
+        }
+
+        mediaSession.setMetadata(metadataBuilder.build())
+    }
+
     private fun createNotification(): Notification {
-        val title = currentChapter?.title ?: "AIAnyBook"
+        val chapterTitle = currentChapter?.title ?: "Ready to play"
+        val bookTitle = currentBookTitle ?: "AIAnyBook"
 
         val playPauseAction = if (_playbackState.value == PlaybackState.PLAYING) {
             NotificationCompat.Action(
-                android.R.drawable.ic_media_pause,
+                R.drawable.ic_pause,
                 "Pause",
                 createPendingIntent(ACTION_PAUSE)
             )
         } else {
             NotificationCompat.Action(
-                android.R.drawable.ic_media_play,
+                R.drawable.ic_play,
                 "Play",
                 createPendingIntent(ACTION_PLAY)
             )
         }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText("Playing")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+        // Tap notification to open app
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentIntent = PendingIntent.getActivity(
+            this, 0, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(bookTitle)
+            .setContentText(chapterTitle)
+            .setSmallIcon(R.drawable.ic_notification)
             .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
                 .setMediaSession(mediaSession.sessionToken)
                 .setShowActionsInCompactView(0, 1, 2))
-            .addAction(android.R.drawable.ic_media_rew, "Rewind", createPendingIntent(ACTION_REWIND))
+            .addAction(R.drawable.ic_skip_back, "Rewind", createPendingIntent(ACTION_REWIND))
             .addAction(playPauseAction)
-            .addAction(android.R.drawable.ic_media_ff, "Forward", createPendingIntent(ACTION_FORWARD))
+            .addAction(R.drawable.ic_skip_forward, "Forward", createPendingIntent(ACTION_FORWARD))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
+            .setContentIntent(contentIntent)
+            .setOngoing(_playbackState.value == PlaybackState.PLAYING)
+
+        // Cover art
+        currentCoverPath?.let { path ->
+            try {
+                val bitmap = BitmapFactory.decodeFile(path)
+                if (bitmap != null) {
+                    builder.setLargeIcon(bitmap)
+                }
+            } catch (_: Exception) {}
+        }
+
+        return builder.build()
     }
 
     private fun updateNotification() {

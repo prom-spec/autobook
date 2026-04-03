@@ -16,12 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import com.autobook.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,28 +30,32 @@ fun ImportScreen(
 ) {
     val importState by viewModel.importState.collectAsState()
 
-    // Back button always goes back to library
-    BackHandler { onBack() }
-
     // Auto-launch file picker on entry
     var pickerLaunched by remember { mutableStateOf(false) }
-    // Track whether we got a result back from the picker
-    var pickerResultReceived by remember { mutableStateOf(false) }
-    // Track whether the activity paused (picker actually opened as overlay/activity)
-    var activityPaused by remember { mutableStateOf(false) }
+    // Track if we already navigated back to prevent double-pop
+    var navigatedBack by remember { mutableStateOf(false) }
 
     // Use */* so all files (including .bin) are visible in the picker
     val mimeTypes = arrayOf("*/*")
 
+    fun safeBack() {
+        if (!navigatedBack) {
+            navigatedBack = true
+            onBack()
+        }
+    }
+
+    // Back button always goes back to library
+    BackHandler { safeBack() }
+
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        pickerResultReceived = true
         if (uri != null) {
             viewModel.importBook(uri)
         } else {
             // User cancelled the file picker — go back to library
-            onBack()
+            safeBack()
         }
     }
     LaunchedEffect(Unit) {
@@ -62,30 +63,6 @@ fun ImportScreen(
             pickerLaunched = true
             launcher.launch(mimeTypes)
         }
-    }
-
-    // If picker was launched but user cancelled (returned to ImportScreen idle), go back
-    LaunchedEffect(pickerResultReceived, importState) {
-        if (pickerLaunched && pickerResultReceived && importState is ImportState.Idle) {
-            onBack()
-        }
-    }
-
-    // Detect when activity resumes after picker closes without calling the callback
-    // Only triggers after ON_PAUSE was seen (so initial composition doesn't false-fire)
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE && pickerLaunched) {
-                activityPaused = true
-            }
-            if (event == Lifecycle.Event.ON_RESUME && activityPaused && !pickerResultReceived) {
-                // Picker closed without giving us a result — user pressed back
-                onBack()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(importState) {
@@ -154,7 +131,7 @@ fun ImportScreen(
 
                         Button(
                             onClick = {
-                                pickerResultReceived = false
+                                navigatedBack = false
                                 launcher.launch(mimeTypes)
                             },
                             colors = ButtonDefaults.buttonColors(
