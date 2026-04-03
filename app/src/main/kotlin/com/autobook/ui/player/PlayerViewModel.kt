@@ -13,6 +13,8 @@ import com.autobook.data.db.ChapterEntity
 import com.autobook.data.repository.BookRepository
 import com.autobook.service.PlaybackService
 import com.autobook.service.PlaybackState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -64,6 +66,8 @@ class PlayerViewModel(
 
     private val _ttsReady = MutableStateFlow(false)
     val ttsReady: StateFlow<Boolean> = _ttsReady
+
+    private var autoSaveJob: Job? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -193,13 +197,21 @@ class PlayerViewModel(
 
         playbackService?.let { service ->
             when (_playbackState.value) {
-                PlaybackState.PLAYING -> service.pause()
-                PlaybackState.PAUSED -> service.play()
+                PlaybackState.PLAYING -> {
+                    service.pause()
+                    savePosition()
+                    stopAutoSave()
+                }
+                PlaybackState.PAUSED -> {
+                    service.play()
+                    startAutoSave()
+                }
                 PlaybackState.IDLE -> {
                     // Load current chapter and play
                     _currentChapter.value?.let { ch ->
                         service.loadChapter(ch, _book.value?.currentCharOffset ?: 0)
                         service.play()
+                        startAutoSave()
                     }
                 }
                 else -> {}
@@ -300,6 +312,21 @@ class PlayerViewModel(
         _playbackSpeed.value = speed
         playbackService?.setSpeed(speed)
         prefs.edit().putFloat(PREF_SPEED, speed).apply()
+    }
+
+        private fun startAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            while (true) {
+                delay(30_000) // Save every 30 seconds
+                savePosition()
+            }
+        }
+    }
+
+    private fun stopAutoSave() {
+        autoSaveJob?.cancel()
+        autoSaveJob = null
     }
 
     fun savePosition() {
