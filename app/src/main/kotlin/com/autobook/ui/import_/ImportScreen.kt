@@ -103,7 +103,13 @@ fun ImportScreen(
                             onClick = {
                                 launcher.launch(arrayOf(
                                     "application/pdf",
-                                    "text/plain"
+                                    "application/epub+zip",
+                                    "application/x-mobipocket-ebook",
+                                    "application/x-fictionbook+xml",
+                                    "application/vnd.oasis.opendocument.text",
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    "text/plain",
+                                    "application/octet-stream"
                                 ))
                             },
                             colors = ButtonDefaults.buttonColors(
