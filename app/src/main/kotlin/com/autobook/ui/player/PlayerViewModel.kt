@@ -62,6 +62,9 @@ class PlayerViewModel(
     private val _skipSeconds = MutableStateFlow(prefs.getInt("skip_seconds", 15))
     val skipSeconds: StateFlow<Int> = _skipSeconds
 
+    private val _ttsReady = MutableStateFlow(false)
+    val ttsReady: StateFlow<Boolean> = _ttsReady
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             Log.d(TAG, "Service connected")
@@ -98,6 +101,12 @@ class PlayerViewModel(
             viewModelScope.launch {
                 playbackService?.currentPosition?.collect { position ->
                     _currentPosition.value = position
+                }
+            }
+
+            viewModelScope.launch {
+                playbackService?.ttsReady?.collect { ready ->
+                    _ttsReady.value = ready
                 }
             }
         }

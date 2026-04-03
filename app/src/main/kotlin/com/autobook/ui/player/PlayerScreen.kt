@@ -3,6 +3,7 @@ package com.autobook.ui.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +44,7 @@ fun PlayerScreen(
     val currentPosition by viewModel.currentPosition.collectAsState()
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val skipSeconds by viewModel.skipSeconds.collectAsState()
+    val ttsReady by viewModel.ttsReady.collectAsState()
 
     var showChapters by remember { mutableStateOf(false) }
 
@@ -359,31 +361,40 @@ fun PlayerScreen(
                     }
 
                     // Play/Pause button — large amber circle
+                    val playEnabled = ttsReady || playbackState == PlaybackState.PLAYING
                     Box(
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
-                            .background(Amber)
-                            .clickable { viewModel.playPause() },
+                            .background(if (playEnabled) Amber else Amber.copy(alpha = 0.4f))
+                            .then(if (playEnabled) Modifier.clickable { viewModel.playPause() } else Modifier),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = if (playbackState == PlaybackState.PLAYING)
-                                Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play",
-                            tint = Color(0xFF261A00),
-                            modifier = Modifier.size(40.dp)
-                        )
+                        if (!ttsReady && playbackState != PlaybackState.PLAYING) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = Color(0xFF261A00),
+                                strokeWidth = 3.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (playbackState == PlaybackState.PLAYING)
+                                    Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (playbackState == PlaybackState.PLAYING) "Pause" else "Play",
+                                tint = Color(0xFF261A00),
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
                     }
 
-                    // Forward
+                    // Forward — mirrored Replay icon
                     IconButton(onClick = { viewModel.skipForward() }) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Default.Forward,
+                                Icons.Default.Replay,
                                 contentDescription = "Forward ${skipSeconds}s",
                                 tint = TextPrimary,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(36.dp).scale(scaleX = -1f, scaleY = 1f)
                             )
                             Text(
                                 "$skipSeconds",

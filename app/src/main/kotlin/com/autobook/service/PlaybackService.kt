@@ -73,7 +73,7 @@ class PlaybackService : Service() {
 
         serviceScope.launch {
             val initialized = ttsEngine.initialize()
-            ttsReady = initialized
+            _ttsReady.value = initialized
             if (initialized) {
                 setupTTSListener()
                 // If play was requested before TTS was ready, start now
@@ -85,8 +85,8 @@ class PlaybackService : Service() {
         }
     }
 
-    @Volatile
-    private var ttsReady = false
+    private val _ttsReady = MutableStateFlow(false)
+    val ttsReady: StateFlow<Boolean> = _ttsReady
     @Volatile
     private var pendingPlay = false
 
@@ -187,7 +187,7 @@ class PlaybackService : Service() {
         if (sentences.isEmpty()) return
 
         // If TTS isn't ready yet, queue play for when it's initialized
-        if (!ttsReady) {
+        if (!_ttsReady.value) {
             pendingPlay = true
             return
         }
