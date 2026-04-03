@@ -1,0 +1,250 @@
+package com.autobook.ui.settings
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import com.autobook.BuildConfig
+import com.autobook.ui.theme.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    viewModel: SettingsViewModel,
+    onBack: () -> Unit,
+    onVoiceChanged: (() -> Unit)? = null
+) {
+    val voices by viewModel.voices.collectAsState()
+    val selectedVoice by viewModel.selectedVoice.collectAsState()
+    var defaultSpeed by remember { mutableStateOf(1.0f) }
+
+    Scaffold(
+        containerColor = Navy,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text("Settings", color = TextPrimary, fontWeight = FontWeight.Bold)
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Voice Selection Section
+            item {
+                SectionHeader("VOICE")
+            }
+
+            if (voices.isNotEmpty()) {
+                items(voices) { voice ->
+                    val isSelected = voice.name == selectedVoice
+                    Card(
+                        modifier = Modifier.clickable {
+                            viewModel.selectVoice(voice.name)
+                            onVoiceChanged?.invoke()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) Amber.copy(alpha = 0.15f) else NavySurface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    voice.displayName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) TextPrimary else TextSecondary
+                                )
+                                Text(
+                                    buildString {
+                                        append(voiceQualityLabel(voice.quality))
+                                        if (voice.isNetwork) append(" • ☁ Network")
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextMuted
+                                )
+                            }
+                            IconButton(
+                                onClick = { viewModel.testVoice(voice.name) },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.PlayCircle,
+                                    contentDescription = "Preview voice",
+                                    tint = if (isSelected) Amber else TextMuted,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Amber
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Text(
+                        "Loading voices…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextMuted
+                    )
+                }
+            }
+
+            // Playback Section
+            item {
+                Spacer(Modifier.height(8.dp))
+                SectionHeader("PLAYBACK")
+            }
+
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = NavySurface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "Default Speed: ${defaultSpeed}x",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        @Suppress("DEPRECATION")
+                        Slider(
+                            value = defaultSpeed,
+                            onValueChange = { defaultSpeed = it },
+                            valueRange = 0.5f..3.0f,
+                            steps = 9,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Amber,
+                                activeTrackColor = Amber,
+                                inactiveTrackColor = NavyMuted
+                            )
+                        )
+                    }
+                }
+            }
+
+            // About section
+            item {
+                Spacer(Modifier.height(8.dp))
+                SectionHeader("ABOUT")
+            }
+
+            item {
+                val context = LocalContext.current
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = NavySurface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        SettingsRow(icon = Icons.Default.Info, title = "Version", subtitle = BuildConfig.VERSION_NAME)
+                        Divider(color = NavyMuted.copy(alpha = 0.3f))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://f-droid.org/packages/${BuildConfig.APPLICATION_ID}/")
+                                    )
+                                    context.startActivity(intent)
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(Icons.Default.Update, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Updates", style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
+                                Text("Via F-Droid", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                            }
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                        }
+                        Divider(color = NavyMuted.copy(alpha = 0.3f))
+                        SettingsRow(icon = Icons.Default.Code, title = "Open Source", subtitle = "Apache License 2.0")
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(32.dp)) }
+        }
+    }
+}
+
+@Composable
+fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        color = TextMuted,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 2.sp,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+fun SettingsRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = TextPrimary)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = TextMuted)
+        }
+    }
+}
+
+private fun voiceQualityLabel(quality: Int): String = when {
+    quality >= 500 -> "Very High"
+    quality >= 400 -> "High"
+    quality >= 300 -> "Normal"
+    quality >= 200 -> "Low"
+    else -> "Very Low"
+}
