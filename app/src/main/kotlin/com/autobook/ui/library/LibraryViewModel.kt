@@ -1,6 +1,7 @@
 package com.autobook.ui.library
 
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.autobook.data.db.BookEntity
@@ -11,6 +12,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 class LibraryViewModel(
     private val repository: BookRepository,
@@ -75,6 +78,24 @@ class LibraryViewModel(
                 repository.updateCoverPath(book.id, null)
             } finally {
                 _researchingCover.value = null
+            }
+        }
+    }
+
+    fun setCustomCover(bookId: String, bitmap: Bitmap) {
+        viewModelScope.launch {
+            try {
+                val coversDir = File(context.filesDir, "covers")
+                if (!coversDir.exists()) coversDir.mkdirs()
+                val coverFile = File(coversDir, "$bookId.jpg")
+                // Delete old cover first
+                if (coverFile.exists()) coverFile.delete()
+                FileOutputStream(coverFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                }
+                repository.updateCoverPath(bookId, coverFile.absolutePath)
+            } catch (e: Exception) {
+                // Silently fail
             }
         }
     }

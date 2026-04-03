@@ -1,7 +1,10 @@
 package com.autobook.ui.library
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,6 +52,17 @@ fun LibraryScreen(
     var showDeleteDialog by remember { mutableStateOf<BookEntity?>(null) }
     var showEditDialog by remember { mutableStateOf<BookEntity?>(null) }
     var showLongClickMenu by remember { mutableStateOf<BookEntity?>(null) }
+    var coverPickBook by remember { mutableStateOf<BookEntity?>(null) }
+    var cropImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Gallery picker launcher
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null && coverPickBook != null) {
+            cropImageUri = uri
+        }
+    }
 
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
@@ -235,6 +249,19 @@ fun LibraryScreen(
                     TextButton(
                         onClick = {
                             showLongClickMenu = null
+                            coverPickBook = book
+                            galleryLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(contentColor = TextPrimary)
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = null, tint = Amber, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Set Cover from Gallery", modifier = Modifier.weight(1f))
+                    }
+                    TextButton(
+                        onClick = {
+                            showLongClickMenu = null
                             showDeleteDialog = book
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -356,6 +383,24 @@ fun LibraryScreen(
                 }
             }
         )
+    }
+
+    // Cover crop dialog
+    cropImageUri?.let { uri ->
+        coverPickBook?.let { book ->
+            CoverCropDialog(
+                imageUri = uri,
+                onConfirm = { croppedBitmap ->
+                    viewModel.setCustomCover(book.id, croppedBitmap)
+                    cropImageUri = null
+                    coverPickBook = null
+                },
+                onDismiss = {
+                    cropImageUri = null
+                    coverPickBook = null
+                }
+            )
+        }
     }
 }
 
