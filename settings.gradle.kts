@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AutoBook"
+rootProject.name = "OpenLoud"
 include(":app")

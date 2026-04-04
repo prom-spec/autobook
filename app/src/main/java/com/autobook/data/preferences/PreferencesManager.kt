@@ -1,4 +1,4 @@
-package com.autobook.data.preferences
+package com.openloud.data.preferences
 
 import android.content.Context
 import androidx.datastore.core.DataStore

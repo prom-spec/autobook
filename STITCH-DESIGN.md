@@ -1,4 +1,4 @@
-# AutoBook Stitch Design Spec
+# OpenLoud Stitch Design Spec
 
 ## Theme: Midnight Amber (Material You / Material3)
 - **Primary:** #FFBF00 (Amber/Gold)
@@ -14,7 +14,7 @@
 ## Screens (8 total)
 
 ### 1. Library Screen
-- Top app bar: "AutoBook" title, search icon, settings gear icon
+- Top app bar: "OpenLoud" title, search icon, settings gear icon
 - "Currently Listening" card with cover art, title, author, progress bar, play button
 - "Your Library" section header with sort/filter
 - Grid of book cards (2 columns): cover art, title, author, progress indicator

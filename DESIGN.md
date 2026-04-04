@@ -1,4 +1,4 @@
-# 📖 AutoBook — Auto Audiobook App
+# 📖 OpenLoud — Auto Audiobook App
 
 ## Concept
 Upload any book (PDF, EPUB, TXT, DOCX) → AI parses it into chapters/sections → high-quality TTS reads it like a real audiobook. Fully free, runs on-device.
@@ -120,7 +120,7 @@ data class ReadPosition(
 ### 1. Library (Home)
 ```
 ┌──────────────────────────┐
-│ 📚 AutoBook              │
+│ 📚 OpenLoud              │
 │ ┌────┐ ┌────┐ ┌────┐    │
 │ │    │ │    │ │    │    │
 │ │ 📕 │ │ 📗 │ │ 📘 │    │
@@ -453,7 +453,7 @@ But honestly — keep it free. It's a utility. Build reputation.
 
 ## Competitive Analysis
 
-| Feature | Google Play Books | Voice Aloud | @Voice | **AutoBook** |
+| Feature | Google Play Books | Voice Aloud | @Voice | **OpenLoud** |
 |---------|------------------|-------------|--------|-------------|
 | Price | Free (books cost $) | Free+ads | $4 | **Free** |
 | TTS Quality | Google TTS | System TTS | System TTS | **Piper Neural** |
@@ -470,7 +470,7 @@ But honestly — keep it free. It's a utility. Build reputation.
 ---
 
 ## App Name Options
-1. **AutoBook** — simple, clear
+1. **OpenLoud** — simple, clear
 2. **ReadAloud** — descriptive
 3. **Narrator** — elegant
 4. **BookVox** — catchy
@@ -494,7 +494,7 @@ But honestly — keep it free. It's a utility. Build reputation.
 ## File Structure
 ```
 app/
-├── src/main/kotlin/com/autobook/
+├── src/main/kotlin/com/openloud/
 │   ├── ui/
 │   │   ├── library/         # Library screen
 │   │   ├── player/          # Player screen

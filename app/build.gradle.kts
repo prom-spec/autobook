@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.autobook"
+    namespace = "com.openloud"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.autobook"
+        applicationId = "com.openloud"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
