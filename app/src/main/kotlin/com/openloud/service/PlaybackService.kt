@@ -4,21 +4,27 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.speech.tts.UtteranceProgressListener
+import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
+import androidx.media.MediaBrowserServiceCompat
 import com.openloud.MainActivity
 import com.openloud.R
+import com.openloud.data.db.AppDatabase
 import com.openloud.data.db.ChapterEntity
 import com.openloud.domain.chapter.ContentCleaner
 import com.openloud.domain.tts.EdgeTTSEngine
@@ -30,11 +36,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-class PlaybackService : Service() {
+class PlaybackService : MediaBrowserServiceCompat() {
 
     private val binder = PlaybackBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private lateinit var database: AppDatabase
 
     private lateinit var systemTTS: SystemTTSEngine
     private var edgeTTS: EdgeTTSEngine? = null
@@ -71,6 +79,7 @@ class PlaybackService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        database = AppDatabase.getDatabase(applicationContext)
         systemTTS = SystemTTSEngine(applicationContext)
         contentCleaner = ContentCleaner()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -82,6 +91,9 @@ class PlaybackService : Service() {
 
         createNotificationChannel()
         setupMediaSession()
+
+        // Set the session token for MediaBrowserService
+        sessionToken = mediaSession.sessionToken
 
         if (useEdgeTTS) {
             initEdgeTTS()
@@ -145,6 +157,10 @@ class PlaybackService : Service() {
 
                 override fun onStop() {
                     stop()
+                }
+
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    mediaId?.let { handlePlayFromMediaId(it) }
                 }
             })
 
@@ -379,7 +395,28 @@ class PlaybackService : Service() {
     fun setBookInfo(title: String?, coverPath: String?) {
         currentBookTitle = title
         currentCoverPath = coverPath
+        // Pre-load cover bitmap for reuse in metadata + notification
+        coverBitmap = loadCoverBitmap(coverPath)
         updateMediaMetadata()
+    }
+
+    private var coverBitmap: Bitmap? = null
+
+    private fun loadCoverBitmap(path: String?, maxSize: Int = 512): Bitmap? {
+        if (path == null) return null
+        return try {
+            // Decode with inSampleSize to avoid OOM on large covers
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, options)
+            val width = options.outWidth
+            val height = options.outHeight
+            var sampleSize = 1
+            while (width / sampleSize > maxSize || height / sampleSize > maxSize) {
+                sampleSize *= 2
+            }
+            val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            BitmapFactory.decodeFile(path, decodeOptions)
+        } catch (_: Exception) { null }
     }
 
     private fun updateMediaMetadata() {
@@ -388,15 +425,19 @@ class PlaybackService : Service() {
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentBookTitle ?: "OpenLoud")
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentBookTitle ?: "OpenLoud")
 
-        // Load cover art
+        // Cover art bitmap — used by notification MediaStyle + Android Auto
+        coverBitmap?.let { bmp ->
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bmp)
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, bmp)
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, bmp)
+        }
+
+        // Uri-based art — Android Auto prefers this for browse/playback screens
         currentCoverPath?.let { path ->
-            try {
-                val bitmap = BitmapFactory.decodeFile(path)
-                if (bitmap != null) {
-                    metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bitmap)
-                    metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, bitmap)
-                }
-            } catch (_: Exception) {}
+            val uri = Uri.fromFile(java.io.File(path)).toString()
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, uri)
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, uri)
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, uri)
         }
 
         mediaSession.setMetadata(metadataBuilder.build())
@@ -443,15 +484,8 @@ class PlaybackService : Service() {
             .setContentIntent(contentIntent)
             .setOngoing(_playbackState.value == PlaybackState.PLAYING)
 
-        // Cover art
-        currentCoverPath?.let { path ->
-            try {
-                val bitmap = BitmapFactory.decodeFile(path)
-                if (bitmap != null) {
-                    builder.setLargeIcon(bitmap)
-                }
-            } catch (_: Exception) {}
-        }
+        // Cover art on notification
+        coverBitmap?.let { builder.setLargeIcon(it) }
 
         return builder.build()
     }
@@ -483,7 +517,14 @@ class PlaybackService : Service() {
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
+    override fun onBind(intent: Intent?): IBinder? {
+        // Handle MediaBrowserService binding
+        if (SERVICE_INTERFACE == intent?.action) {
+            return super.onBind(intent)
+        }
+        // Handle local binding
+        return binder
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -494,9 +535,137 @@ class PlaybackService : Service() {
         serviceScope.cancel()
     }
 
+    // MediaBrowserService methods for Android Auto support
+    override fun onGetRoot(
+        clientPackageName: String,
+        clientUid: Int,
+        rootHints: Bundle?
+    ): BrowserRoot? {
+        // Allow all clients (including Android Auto) to browse
+        return BrowserRoot(MEDIA_ROOT_ID, null)
+    }
+
+    override fun onLoadChildren(
+        parentId: String,
+        result: Result<MutableList<MediaBrowserCompat.MediaItem>>
+    ) {
+        result.detach()
+
+        serviceScope.launch(Dispatchers.IO) {
+            val mediaItems = mutableListOf<MediaBrowserCompat.MediaItem>()
+
+            try {
+                when {
+                    parentId == MEDIA_ROOT_ID -> {
+                        // Load all books as browsable items (one-shot, not Flow)
+                        val bookList = database.bookDao().getAllBooksSync()
+                        bookList.forEach { book ->
+                            val descBuilder = MediaDescriptionCompat.Builder()
+                                .setMediaId("book_${book.id}")
+                                .setTitle(book.title)
+                                .setSubtitle(book.author ?: "Unknown Author")
+
+                            // Set cover art via Uri (preferred by Android Auto) + bitmap fallback
+                            book.coverPath?.let { path ->
+                                descBuilder.setIconUri(Uri.fromFile(java.io.File(path)))
+                                loadCoverBitmap(path, 256)?.let { descBuilder.setIconBitmap(it) }
+                            }
+
+                            mediaItems.add(
+                                MediaBrowserCompat.MediaItem(
+                                    descBuilder.build(),
+                                    MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
+                                )
+                            )
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            result.sendResult(mediaItems)
+                        }
+                    }
+
+                    parentId.startsWith("book_") -> {
+                        // Load chapters for the book as playable items
+                        val bookId = parentId.removePrefix("book_")
+                        val book = database.bookDao().getBook(bookId)
+                        val chapters = database.chapterDao().getChaptersForBookSync(bookId)
+                        // Load book cover once for all chapters
+                        val bookCoverUri = book?.coverPath?.let { Uri.fromFile(java.io.File(it)) }
+                        val bookCoverBmp = loadCoverBitmap(book?.coverPath, 256)
+
+                        chapters.forEach { chapter ->
+                            val descBuilder = MediaDescriptionCompat.Builder()
+                                .setMediaId("chapter_${chapter.bookId}_${chapter.id}")
+                                .setTitle(chapter.title)
+                                .setSubtitle(book?.title ?: "")
+
+                            bookCoverUri?.let { descBuilder.setIconUri(it) }
+                            bookCoverBmp?.let { descBuilder.setIconBitmap(it) }
+
+                            mediaItems.add(
+                                MediaBrowserCompat.MediaItem(
+                                    descBuilder.build(),
+                                    MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
+                                )
+                            )
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            result.sendResult(mediaItems)
+                        }
+                    }
+
+                    else -> {
+                        withContext(Dispatchers.Main) {
+                            result.sendResult(mediaItems)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlaybackService", "Error loading children", e)
+                withContext(Dispatchers.Main) {
+                    result.sendResult(mediaItems)
+                }
+            }
+        }
+    }
+
+    private fun handlePlayFromMediaId(mediaId: String) {
+        if (!mediaId.startsWith("chapter_")) return
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                // Parse chapter ID from format: "chapter_{bookId}_{chapterId}"
+                val parts = mediaId.removePrefix("chapter_").split("_")
+                if (parts.size >= 2) {
+                    val bookId = parts[0]
+                    val chapterId = parts[1]
+
+                    // Load book and chapter from database
+                    val book = database.bookDao().getBook(bookId)
+                    val chapter = database.chapterDao().getChapter(chapterId)
+
+                    if (book != null && chapter != null) {
+                        withContext(Dispatchers.Main) {
+                            // Set book info for metadata
+                            setBookInfo(book.title, book.coverPath)
+
+                            // Load and play the chapter
+                            loadChapter(chapter, 0)
+                            play()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlaybackService", "Error playing from media ID", e)
+            }
+        }
+    }
+
     companion object {
         private const val CHANNEL_ID = "openloud_playback"
         private const val NOTIFICATION_ID = 1
+        private const val MEDIA_ROOT_ID = "ROOT"
 
         const val ACTION_PLAY = "com.openloud.action.PLAY"
         const val ACTION_PAUSE = "com.openloud.action.PAUSE"
