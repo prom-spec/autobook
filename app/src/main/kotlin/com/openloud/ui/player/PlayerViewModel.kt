@@ -135,6 +135,13 @@ class PlayerViewModel(
 
     fun loadBook(bookId: String) {
         viewModelScope.launch {
+            // Save position of the previously loaded book before switching
+            val prevBook = _book.value
+            if (prevBook != null && prevBook.id != bookId) {
+                val sentenceIndex = playbackService?.getCurrentSentenceIndex() ?: 0
+                repository.updateReadPosition(prevBook.id, prevBook.currentChapterIndex, sentenceIndex)
+            }
+
             val bookEntity = repository.getBook(bookId)
             _book.value = bookEntity
             Log.d(TAG, "Book loaded: ${bookEntity?.title}, chapters: ${bookEntity?.totalChapters}")

@@ -14,6 +14,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Binder
+import androidx.core.content.FileProvider
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -195,6 +196,17 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
                     mediaId?.let { handlePlayFromMediaId(it) }
                 }
+
+                override fun onSeekTo(pos: Long) {
+                    val targetSentence = (pos / msPerSentence).toInt().coerceIn(0, sentences.size - 1)
+                    currentSentenceIndex = targetSentence
+                    _currentPosition.value = targetSentence
+                    updateMediaSessionState()
+                    if (_playbackState.value == PlaybackState.PLAYING) {
+                        if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
+                        playNextSentence()
+                    }
+                }
             })
 
             isActive = true
@@ -273,6 +285,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
         if (currentSentenceIndex < sentences.size) {
             val sentence = sentences[currentSentenceIndex]
             _currentPosition.value = currentSentenceIndex
+            updateMediaSessionState() // Update progress bar for Android Auto
             currentSentenceIndex++
 
             if (sentence == ContentCleaner.PARAGRAPH_BREAK) {
@@ -311,11 +324,15 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     fun loadChapter(chapter: ChapterEntity, startSentence: Int = 0) {
+        // Stop any ongoing TTS before switching chapters
+        if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
+
         currentChapter = chapter
         sentences = contentCleaner.splitIntoSentences(chapter.textContent)
         currentSentenceIndex = startSentence
         _currentPosition.value = startSentence
         updateMediaMetadata()
+        updateMediaSessionState()
         updateNotification()
     }
 
@@ -357,7 +374,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
     fun stop() {
         if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
         _playbackState.value = PlaybackState.IDLE
-        currentSentenceIndex = 0
+        // Preserve position so Android Auto / notification can resume from here
         abandonAudioFocus()
         updateMediaSessionState()
         stopForeground(true)
@@ -432,6 +449,12 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     fun getCurrentSentenceIndex(): Int = currentSentenceIndex
 
+    // Estimate milliseconds per sentence for progress reporting (Android Auto needs ms)
+    private val msPerSentence = 3000L
+
+    private fun estimatedPositionMs(): Long = currentSentenceIndex.toLong() * msPerSentence
+    private fun estimatedDurationMs(): Long = sentences.size.toLong() * msPerSentence
+
     private fun updateMediaSessionState() {
         val state = when (_playbackState.value) {
             PlaybackState.PLAYING -> PlaybackStateCompat.STATE_PLAYING
@@ -446,9 +469,10 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 PlaybackStateCompat.ACTION_PAUSE or
                 PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                 PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                PlaybackStateCompat.ACTION_STOP
+                PlaybackStateCompat.ACTION_STOP or
+                PlaybackStateCompat.ACTION_SEEK_TO
             )
-            .setState(state, currentSentenceIndex.toLong(), playbackSpeed)
+            .setState(state, estimatedPositionMs(), if (_playbackState.value == PlaybackState.PLAYING) playbackSpeed else 0f)
 
         mediaSession.setPlaybackState(stateBuilder.build())
     }
@@ -493,12 +517,26 @@ class PlaybackService : MediaBrowserServiceCompat() {
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, bmp)
         }
 
-        // Uri-based art — Android Auto prefers this for browse/playback screens
+        // Duration estimate for Android Auto progress bar
+        if (sentences.isNotEmpty()) {
+            metadataBuilder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, estimatedDurationMs())
+        }
+
+        // Content URI art — Android Auto requires content:// scheme
         currentCoverPath?.let { path ->
-            val uri = Uri.fromFile(java.io.File(path)).toString()
-            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, uri)
-            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, uri)
-            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, uri)
+            try {
+                val file = java.io.File(path)
+                if (file.exists()) {
+                    val contentUri = FileProvider.getUriForFile(
+                        this@PlaybackService, "com.openloud.fileprovider", file
+                    ).toString()
+                    metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, contentUri)
+                    metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, contentUri)
+                    metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, contentUri)
+                }
+            } catch (_: Exception) {
+                // Fall back to bitmap only (already set above)
+            }
         }
 
         mediaSession.setMetadata(metadataBuilder.build())
@@ -642,24 +680,38 @@ class PlaybackService : MediaBrowserServiceCompat() {
             try {
                 when {
                     parentId == MEDIA_ROOT_ID -> {
-                        // Load all books as browsable items (one-shot, not Flow)
+                        // Load all books, deduplicated by title (keep most recently read)
                         val bookList = database.bookDao().getAllBooksSync()
+                        val seen = mutableSetOf<String>()
                         bookList.forEach { book ->
+                            val key = book.title.lowercase().trim()
+                            if (!seen.add(key)) return@forEach
+
                             val descBuilder = MediaDescriptionCompat.Builder()
                                 .setMediaId("book_${book.id}")
                                 .setTitle(book.title)
                                 .setSubtitle(book.author ?: "Unknown Author")
 
-                            // Set cover art via Uri (preferred by Android Auto) + bitmap fallback
+                            // Set cover art via content URI (required by Android Auto) + bitmap
                             book.coverPath?.let { path ->
-                                descBuilder.setIconUri(Uri.fromFile(java.io.File(path)))
-                                loadCoverBitmap(path, 256)?.let { descBuilder.setIconBitmap(it) }
+                                try {
+                                    val file = java.io.File(path)
+                                    if (file.exists()) {
+                                        val contentUri = FileProvider.getUriForFile(
+                                            this@PlaybackService,
+                                            "com.openloud.fileprovider",
+                                            file
+                                        )
+                                        descBuilder.setIconUri(contentUri)
+                                    }
+                                } catch (_: Exception) {}
+                                loadCoverBitmap(path, 400)?.let { descBuilder.setIconBitmap(it) }
                             }
 
                             mediaItems.add(
                                 MediaBrowserCompat.MediaItem(
                                     descBuilder.build(),
-                                    MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
+                                    MediaBrowserCompat.MediaItem.FLAG_BROWSABLE or MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
                                 )
                             )
                         }
@@ -674,9 +726,16 @@ class PlaybackService : MediaBrowserServiceCompat() {
                         val bookId = parentId.removePrefix("book_")
                         val book = database.bookDao().getBook(bookId)
                         val chapters = database.chapterDao().getChaptersForBookSync(bookId)
-                        // Load book cover once for all chapters
-                        val bookCoverUri = book?.coverPath?.let { Uri.fromFile(java.io.File(it)) }
-                        val bookCoverBmp = loadCoverBitmap(book?.coverPath, 256)
+                        // Load book cover once for all chapters (content URI for Android Auto)
+                        val bookCoverUri = book?.coverPath?.let { path ->
+                            try {
+                                val file = java.io.File(path)
+                                if (file.exists()) FileProvider.getUriForFile(
+                                    this@PlaybackService, "com.openloud.fileprovider", file
+                                ) else null
+                            } catch (_: Exception) { null }
+                        }
+                        val bookCoverBmp = loadCoverBitmap(book?.coverPath, 400)
 
                         chapters.forEach { chapter ->
                             val descBuilder = MediaDescriptionCompat.Builder()
@@ -716,28 +775,39 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     private fun handlePlayFromMediaId(mediaId: String) {
-        if (!mediaId.startsWith("chapter_")) return
-
         serviceScope.launch(Dispatchers.IO) {
             try {
-                // Parse chapter ID from format: "chapter_{bookId}_{chapterId}"
-                val parts = mediaId.removePrefix("chapter_").split("_")
-                if (parts.size >= 2) {
-                    val bookId = parts[0]
-                    val chapterId = parts[1]
+                // Save current position before switching
+                saveCurrentPositionToDb()
 
-                    // Load book and chapter from database
-                    val book = database.bookDao().getBook(bookId)
-                    val chapter = database.chapterDao().getChapter(chapterId)
+                if (mediaId.startsWith("book_")) {
+                    // User tapped a book — resume from saved position
+                    val bookId = mediaId.removePrefix("book_")
+                    val book = database.bookDao().getBook(bookId) ?: return@launch
+                    val chapters = database.chapterDao().getChaptersForBookSync(bookId)
+                    val chapter = chapters.getOrNull(book.currentChapterIndex) ?: chapters.firstOrNull() ?: return@launch
 
-                    if (book != null && chapter != null) {
-                        withContext(Dispatchers.Main) {
-                            // Set book info for metadata
-                            setBookInfo(book.title, book.coverPath)
+                    withContext(Dispatchers.Main) {
+                        setBookInfo(book.title, book.coverPath)
+                        loadChapter(chapter, book.currentCharOffset)
+                        play()
+                    }
+                } else if (mediaId.startsWith("chapter_")) {
+                    // Parse chapter ID from format: "chapter_{bookId}_{chapterId}"
+                    val parts = mediaId.removePrefix("chapter_").split("_")
+                    if (parts.size >= 2) {
+                        val bookId = parts[0]
+                        val chapterId = parts[1]
 
-                            // Load and play the chapter
-                            loadChapter(chapter, 0)
-                            play()
+                        val book = database.bookDao().getBook(bookId)
+                        val chapter = database.chapterDao().getChapter(chapterId)
+
+                        if (book != null && chapter != null) {
+                            withContext(Dispatchers.Main) {
+                                setBookInfo(book.title, book.coverPath)
+                                loadChapter(chapter, 0)
+                                play()
+                            }
                         }
                     }
                 }
@@ -745,6 +815,16 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 android.util.Log.e("PlaybackService", "Error playing from media ID", e)
             }
         }
+    }
+
+    /** Persist current read position to the database */
+    private suspend fun saveCurrentPositionToDb() {
+        val chapter = currentChapter ?: return
+        val bookId = chapter.bookId
+        val book = database.bookDao().getBook(bookId) ?: return
+        val chapters = database.chapterDao().getChaptersForBookSync(bookId)
+        val chapterIndex = chapters.indexOfFirst { it.id == chapter.id }.takeIf { it >= 0 } ?: return
+        database.bookDao().updateReadPosition(bookId, chapterIndex, currentSentenceIndex, System.currentTimeMillis())
     }
 
     companion object {
