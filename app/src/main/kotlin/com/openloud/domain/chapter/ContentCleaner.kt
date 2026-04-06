@@ -40,13 +40,24 @@ class ContentCleaner {
             .replace("&quot;", "\"")
             .replace("&apos;", "'")
             .replace("&#39;", "'")
+            .replace("&lsquo;", "\u2018")
+            .replace("&rsquo;", "\u2019")
+            .replace("&ldquo;", "\u201C")
+            .replace("&rdquo;", "\u201D")
+            .replace("&mdash;", "\u2014")
+            .replace("&ndash;", "\u2013")
+            .replace("&hellip;", "\u2026")
             .replace(Regex("&#(\\d+);")) { match ->
                 val code = match.groupValues[1].toIntOrNull()
-                if (code != null && code in 32..126) code.toChar().toString() else ""
+                if (code != null && code in 32..65535) {
+                    try { code.toChar().toString() } catch (_: Exception) { "" }
+                } else ""
             }
             .replace(Regex("&#x([0-9a-fA-F]+);")) { match ->
                 val code = match.groupValues[1].toIntOrNull(16)
-                if (code != null && code in 32..126) code.toChar().toString() else ""
+                if (code != null && code in 32..65535) {
+                    try { code.toChar().toString() } catch (_: Exception) { "" }
+                } else ""
             }
 
         // Strip all remaining HTML tags
