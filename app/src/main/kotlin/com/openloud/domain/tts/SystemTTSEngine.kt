@@ -1,16 +1,23 @@
 package com.openloud.domain.tts
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
+import java.io.File
 import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+/**
+ * System TTS engine that synthesizes to file and plays via MediaPlayer.
+ * This guarantees a stable audio session ID for LoudnessEnhancer to attach to.
+ */
 class SystemTTSEngine(private val context: Context) {
 
     companion object {
@@ -20,6 +27,9 @@ class SystemTTSEngine(private val context: Context) {
     private var tts: TextToSpeech? = null
     private var isInitialized = false
     private var audioSessionId: Int = 0
+    private var mediaPlayer: MediaPlayer? = null
+    private var externalProgressListener: UtteranceProgressListener? = null
+    private var currentSpeed: Float = 1.0f
 
     suspend fun initialize(): Boolean = suspendCoroutine { continuation ->
         // Generate a stable audio session ID for LoudnessEnhancer
@@ -32,12 +42,76 @@ class SystemTTSEngine(private val context: Context) {
             if (isInitialized) {
                 tts?.language = Locale.US
                 selectBestVoice()
-                // Natural narration pitch — slightly lower
                 tts?.setPitch(0.95f)
-                // Slightly slower than default for narration clarity
                 tts?.setSpeechRate(0.92f)
+
+                // Internal listener for synthesize-to-file completion
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(utteranceId: String?) {
+                        utteranceId?.let { playGeneratedFile(it) }
+                    }
+                    override fun onError(utteranceId: String?) {
+                        Log.e(TAG, "TTS synthesis error for $utteranceId")
+                        utteranceId?.let { externalProgressListener?.onError(it) }
+                    }
+                    @Deprecated("Deprecated")
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        onError(utteranceId)
+                    }
+                })
             }
             continuation.resume(isInitialized)
+        }
+    }
+
+    private fun getTempFile(utteranceId: String): File {
+        return File(context.cacheDir, "sys_tts_${utteranceId.hashCode()}.wav")
+    }
+
+    private fun playGeneratedFile(utteranceId: String) {
+        val file = getTempFile(utteranceId)
+        if (!file.exists() || file.length() == 0L) {
+            Log.e(TAG, "Generated file missing or empty: ${file.absolutePath}")
+            externalProgressListener?.onError(utteranceId)
+            return
+        }
+
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = MediaPlayer().apply {
+                setAudioSessionId(audioSessionId)
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+                setDataSource(file.absolutePath)
+                prepare()
+
+                // Apply speed via MediaPlayer playback params
+                if (currentSpeed != 1.0f) {
+                    playbackParams = playbackParams.setSpeed(currentSpeed * 0.92f)
+                }
+
+                setOnCompletionListener {
+                    file.delete()
+                    externalProgressListener?.onDone(utteranceId)
+                }
+                setOnErrorListener { _, _, _ ->
+                    file.delete()
+                    externalProgressListener?.onError(utteranceId)
+                    true
+                }
+
+                externalProgressListener?.onStart(utteranceId)
+                start()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error playing synthesized file: ${e.message}", e)
+            file.delete()
+            externalProgressListener?.onError(utteranceId)
         }
     }
 
@@ -53,18 +127,16 @@ class SystemTTSEngine(private val context: Context) {
             }
         }
 
-        // Only en-US voices, sorted same as Settings screen
         val englishVoices = tts?.voices?.filter {
             it.locale.language == "en" && it.locale.country == "US"
         }?.sortedWith(compareByDescending<Voice> {
             it.quality
         }.thenBy {
-            if (it.isNetworkConnectionRequired) 1 else 0 // offline first (matches Settings)
+            if (it.isNetworkConnectionRequired) 1 else 0
         }.thenBy {
             it.name
         })
 
-        // Default to voice #12 (index 11) — reads best per user preference
         val defaultIndex = 11
         val bestVoice = if (englishVoices != null && englishVoices.size > defaultIndex) {
             englishVoices[defaultIndex]
@@ -82,66 +154,39 @@ class SystemTTSEngine(private val context: Context) {
         Log.d(TAG, "Available EN voices: ${englishVoices?.take(15)?.mapIndexed { i, v -> "#${i+1} ${v.name} (q=${v.quality}, net=${v.isNetworkConnectionRequired})" }}")
     }
 
-    /** Re-read saved voice from SharedPreferences and apply it */
     fun reloadVoice() {
         selectBestVoice()
     }
 
     fun setSpeed(speed: Float) {
-        tts?.setSpeechRate(speed * 0.92f) // Apply our base rate adjustment
+        currentSpeed = speed
+        tts?.setSpeechRate(speed * 0.92f)
     }
 
     /**
-     * Speak a chunk of text (may be multiple sentences batched together).
-     * Uses SSML when supported for more natural prosody.
+     * Synthesize text to file, then play through MediaPlayer for volume boost support.
      */
     fun speakChunk(text: String, utteranceId: String) {
         if (!isInitialized || text.isBlank()) return
 
-        // Route audio through our stable session ID so LoudnessEnhancer works
-        val params = Bundle().apply {
-            if (audioSessionId != 0) {
-                putInt(TextToSpeech.Engine.KEY_PARAM_SESSION_ID, audioSessionId)
-            }
-        }
+        val outFile = getTempFile(utteranceId)
 
-        // Try SSML for natural prosody (pauses at commas, emphasis)
-        val ssml = buildSSML(text)
-        val result = tts?.speak(ssml, TextToSpeech.QUEUE_ADD, params, utteranceId)
+        // Synthesize to file — onDone will trigger playback via MediaPlayer
+        val result = tts?.synthesizeToFile(text, null, outFile, utteranceId)
 
-        // If SSML failed (some engines don't support it), fall back to plain text
         if (result != TextToSpeech.SUCCESS) {
-            tts?.speak(text, TextToSpeech.QUEUE_ADD, params, utteranceId)
+            Log.e(TAG, "synthesizeToFile failed with result $result")
+            externalProgressListener?.onError(utteranceId)
         }
     }
 
-    /**
-     * Build SSML markup for more natural speech.
-     */
-    private fun buildSSML(text: String): String {
-        val sb = StringBuilder()
-        sb.append("<speak>")
-        sb.append("<prosody rate=\"medium\" pitch=\"-2st\">")
-
-        // Add break hints at semicolons and em-dashes for natural pauses
-        var processed = text
-            .replace(";", ";<break time=\"200ms\"/>")
-            .replace(" — ", " <break time=\"250ms\"/> ")
-            .replace(" - ", " <break time=\"150ms\"/> ")
-
-        sb.append(processed)
-        sb.append("</prosody>")
-        sb.append("</speak>")
-        return sb.toString()
-    }
-
-    // Keep legacy method for compatibility
     fun speakSentence(text: String, utteranceId: String) {
         speakChunk(text, utteranceId)
     }
 
     fun speakWithPause(text: String, utteranceId: String, pauseMs: Int = 500) {
         if (!isInitialized) return
+        // For pause, still use direct TTS silent utterance, then synthesize-to-file for text
         tts?.playSilentUtterance(pauseMs.toLong(), TextToSpeech.QUEUE_ADD, "pause_$utteranceId")
         if (text.isNotBlank()) {
             speakChunk(text, utteranceId)
@@ -150,24 +195,38 @@ class SystemTTSEngine(private val context: Context) {
 
     fun stop() {
         tts?.stop()
+        mediaPlayer?.let {
+            try {
+                if (it.isPlaying) it.stop()
+                it.reset()
+            } catch (_: Exception) {}
+        }
     }
 
     fun pause() {
         tts?.stop()
+        mediaPlayer?.let {
+            try {
+                if (it.isPlaying) it.pause()
+            } catch (_: Exception) {}
+        }
     }
 
     fun shutdown() {
+        stop()
+        mediaPlayer?.release()
+        mediaPlayer = null
         tts?.shutdown()
         tts = null
         isInitialized = false
     }
 
     fun setProgressListener(listener: UtteranceProgressListener) {
-        tts?.setOnUtteranceProgressListener(listener)
+        externalProgressListener = listener
     }
 
     fun isPlaying(): Boolean {
-        return tts?.isSpeaking == true
+        return mediaPlayer?.isPlaying == true || tts?.isSpeaking == true
     }
 
     fun getAvailableVoices(): List<Voice> {
@@ -178,9 +237,5 @@ class SystemTTSEngine(private val context: Context) {
         }.thenBy { it.name }) ?: emptyList()
     }
 
-    /**
-     * Get the audio session ID for applying audio effects like LoudnessEnhancer.
-     * Returns 0 if not available.
-     */
     fun getAudioSessionId(): Int = audioSessionId
 }
