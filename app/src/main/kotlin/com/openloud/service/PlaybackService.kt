@@ -250,9 +250,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
             if (sentence == ContentCleaner.PARAGRAPH_BREAK) {
                 // Insert a pause for paragraph breaks, then continue
                 if (useEdgeTTS) {
-                    edgeTTS?.speakWithPause("", "para_$currentSentenceIndex", 250)
+                    edgeTTS?.speakWithPause("", "para_$currentSentenceIndex", 200)
                 } else {
-                    systemTTS.speakWithPause("", "para_$currentSentenceIndex", 250)
+                    systemTTS.speakWithPause("", "para_$currentSentenceIndex", 200)
                 }
                 return
             }

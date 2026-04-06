@@ -325,43 +325,6 @@ fun PlayerScreen(
                     )
                 }
 
-                Spacer(Modifier.height(12.dp))
-
-                // Volume Boost Control
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = if (volumeBoost > 0) Icons.Default.VolumeUp else Icons.Default.VolumeDown,
-                        contentDescription = "Volume Boost",
-                        tint = if (volumeBoost > 0) Amber else TextMuted,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Slider(
-                        value = volumeBoost.toFloat(),
-                        onValueChange = { viewModel.setVolumeBoost(it.toInt()) },
-                        valueRange = 0f..100f,
-                        modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(
-                            thumbColor = Amber,
-                            activeTrackColor = Amber,
-                            inactiveTrackColor = NavyMuted
-                        )
-                    )
-                    Text(
-                        if (volumeBoost > 0) "+${volumeBoost}%" else "Off",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (volumeBoost > 0) Amber else TextMuted,
-                        fontSize = 11.sp,
-                        modifier = Modifier.width(42.dp),
-                        textAlign = TextAlign.End
-                    )
-                }
-
                 Spacer(Modifier.height(16.dp))
 
                 // Playback controls
