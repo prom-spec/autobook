@@ -9,6 +9,9 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Binder
 import android.os.Build
@@ -53,6 +56,30 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private lateinit var notificationManager: NotificationManager
     private lateinit var prefs: SharedPreferences
     private var currentVolumeBoostMb: Int = 0
+    private lateinit var audioManager: AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var hasAudioFocus = false
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                hasAudioFocus = true
+                if (_playbackState.value == PlaybackState.PAUSED) resume()
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                hasAudioFocus = false
+                pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                hasAudioFocus = false
+                pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // Could lower volume, but for TTS just pause
+                hasAudioFocus = false
+                pause()
+            }
+        }
+    }
     private val voiceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         when (key) {
             "selected_voice" -> if (!useEdgeTTS) setVoice()
@@ -83,6 +110,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
         super.onCreate()
 
         database = AppDatabase.getDatabase(applicationContext)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         systemTTS = SystemTTSEngine(applicationContext)
         contentCleaner = ContentCleaner()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -302,6 +330,11 @@ class PlaybackService : MediaBrowserServiceCompat() {
             return
         }
 
+        // Request audio focus
+        if (!requestAudioFocus()) {
+            Log.w("PlaybackService", "Failed to acquire audio focus")
+        }
+
         _playbackState.value = PlaybackState.PLAYING
         playNextSentence()
         startForeground(NOTIFICATION_ID, createNotification())
@@ -325,6 +358,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
         if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
         _playbackState.value = PlaybackState.IDLE
         currentSentenceIndex = 0
+        abandonAudioFocus()
         updateMediaSessionState()
         stopForeground(true)
     }
@@ -553,8 +587,32 @@ class PlaybackService : MediaBrowserServiceCompat() {
         return binder
     }
 
+    private fun requestAudioFocus(): Boolean {
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attrs)
+            .setOnAudioFocusChangeListener(audioFocusListener)
+            .setWillPauseWhenDucked(true)
+            .build()
+        audioFocusRequest = request
+
+        val result = audioManager.requestAudioFocus(request)
+        hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        return hasAudioFocus
+    }
+
+    private fun abandonAudioFocus() {
+        audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        hasAudioFocus = false
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        abandonAudioFocus()
         prefs.unregisterOnSharedPreferenceChangeListener(voiceChangeListener)
         systemTTS.shutdown()
         edgeTTS?.shutdown()
