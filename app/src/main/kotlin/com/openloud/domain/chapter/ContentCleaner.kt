@@ -5,6 +5,9 @@ class ContentCleaner {
     fun cleanText(text: String): String {
         var cleaned = text
 
+        // Strip HTML tags (MOBI parser returns raw HTML)
+        cleaned = stripHtml(cleaned)
+
         // Remove page numbers (standalone numbers on their own line)
         cleaned = removePageNumbers(cleaned)
 
@@ -16,6 +19,38 @@ class ContentCleaner {
 
         // Normalize whitespace
         cleaned = normalizeWhitespace(cleaned)
+
+        return cleaned
+    }
+
+    private fun stripHtml(text: String): String {
+        var cleaned = text
+
+        // Convert block-level tags to newlines for paragraph breaks
+        cleaned = cleaned.replace(Regex("<\\s*(br|p|div|h[1-6]|li|tr|blockquote)[^>]*/?>", RegexOption.IGNORE_CASE), "\n")
+        // Remove closing block tags
+        cleaned = cleaned.replace(Regex("</\\s*(p|div|h[1-6]|li|tr|blockquote|ul|ol|table)\\s*>", RegexOption.IGNORE_CASE), "\n")
+
+        // Decode common HTML entities
+        cleaned = cleaned
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&#39;", "'")
+            .replace(Regex("&#(\\d+);")) { match ->
+                val code = match.groupValues[1].toIntOrNull()
+                if (code != null && code in 32..126) code.toChar().toString() else ""
+            }
+            .replace(Regex("&#x([0-9a-fA-F]+);")) { match ->
+                val code = match.groupValues[1].toIntOrNull(16)
+                if (code != null && code in 32..126) code.toChar().toString() else ""
+            }
+
+        // Strip all remaining HTML tags
+        cleaned = cleaned.replace(Regex("<[^>]*>"), "")
 
         return cleaned
     }
