@@ -52,6 +52,11 @@ fun OpenLoudApp(repository: BookRepository) {
     val navController = rememberNavController()
     val context = LocalContext.current
 
+    // Scoped to the activity so the player ViewModel survives screen navigation
+    val playerViewModel: PlayerViewModel = viewModel(
+        factory = PlayerViewModelFactory(repository, context)
+    )
+
     NavHost(
         navController = navController,
         startDestination = Screen.Library.route
@@ -95,12 +100,9 @@ fun OpenLoudApp(repository: BookRepository) {
             arguments = listOf(navArgument("bookId") { type = NavType.StringType })
         ) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getString("bookId") ?: return@composable
-            val viewModel: PlayerViewModel = viewModel(
-                factory = PlayerViewModelFactory(repository, navController.context)
-            )
 
             PlayerScreen(
-                viewModel = viewModel,
+                viewModel = playerViewModel,
                 bookId = bookId,
                 onBack = { navController.popBackStack() }
             )

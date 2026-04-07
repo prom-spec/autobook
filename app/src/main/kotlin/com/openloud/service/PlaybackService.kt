@@ -307,17 +307,23 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     private fun playNextSentence() {
         if (currentSentenceIndex < sentences.size) {
-            val sentence = sentences[currentSentenceIndex]
+            var sentence = sentences[currentSentenceIndex]
             _currentPosition.value = currentSentenceIndex
             updateMediaSessionState() // Update progress bar for Android Auto
             currentSentenceIndex++
 
             if (sentence == ContentCleaner.PARAGRAPH_BREAK) {
-                // Insert a pause for paragraph breaks, then continue
+                // Skip any consecutive paragraph breaks (already-imported books may have many)
+                while (currentSentenceIndex < sentences.size &&
+                       sentences[currentSentenceIndex] == ContentCleaner.PARAGRAPH_BREAK) {
+                    currentSentenceIndex++
+                }
+                _currentPosition.value = currentSentenceIndex
+                // Single short pause for the paragraph gap
                 if (useEdgeTTS) {
-                    edgeTTS?.speakWithPause("", "para_$currentSentenceIndex", 200)
+                    edgeTTS?.speakWithPause("", "para_$currentSentenceIndex", 150)
                 } else {
-                    systemTTS.speakWithPause("", "para_$currentSentenceIndex", 200)
+                    systemTTS.speakWithPause("", "para_$currentSentenceIndex", 150)
                 }
                 return
             }
