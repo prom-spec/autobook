@@ -337,6 +337,11 @@ class PlayerViewModel(
                     _book.value = book.copy(currentChapterIndex = index, currentCharOffset = sentenceIndex)
                     playbackService?.stop()
                     playbackService?.loadChapter(chapter, sentenceIndex)
+                    // Set elapsed time proportional to seek position
+                    val totalWords = chapterList.sumOf { it.textContent.split(Regex("\\s+")).size }
+                    val wordsPerMin = 150f * (_playbackSpeed.value)
+                    val seekElapsedMs = ((totalWords * progress / wordsPerMin) * 60000f).toLong()
+                    playbackService?.restoreElapsedTime(seekElapsedMs)
                     playbackService?.play()
                     break
                 }

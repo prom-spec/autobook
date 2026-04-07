@@ -104,12 +104,8 @@ fun PlayerScreen(
     val elapsedMinutes = elapsedTimeMs / 60000f
     // Extrapolate total from real playback speed when we have enough data
     val progress = if (totalWords > 0) wordsRead.toFloat() / totalWords.coerceAtLeast(1) else 0f
-    val estimatedTotalMinutes = if (progress > 0.01f && elapsedMinutes > 0.1f) {
-        elapsedMinutes / progress  // real extrapolation
-    } else {
-        totalMinutes  // fallback to word-count estimate until we have data
-    }
-    val remainingMinutes = (estimatedTotalMinutes - elapsedMinutes).coerceAtLeast(0f)
+    // Use word-count estimate for total (stable), real elapsed for current
+    val remainingMinutes = (totalMinutes - elapsedMinutes).coerceAtLeast(0f)
 
     Scaffold(
         containerColor = Navy,
@@ -331,7 +327,7 @@ fun PlayerScreen(
                             fontSize = 11.sp
                         )
                         Text(
-                            formatDuration(estimatedTotalMinutes),
+                            formatDuration(totalMinutes),
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             fontSize = 11.sp

@@ -471,6 +471,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
         val sentencesToSkip = (millis / 3000).coerceAtLeast(1) // ~3 seconds per sentence
         currentSentenceIndex = (currentSentenceIndex + sentencesToSkip).coerceAtMost(sentences.size - 1)
         _currentPosition.value = currentSentenceIndex
+        // Adjust elapsed time to match skip
+        adjustElapsedTime(millis.toLong())
 
         if (_playbackState.value == PlaybackState.PLAYING) {
             if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
@@ -482,11 +484,24 @@ class PlaybackService : MediaBrowserServiceCompat() {
         val sentencesToSkip = (millis / 3000).coerceAtLeast(1)
         currentSentenceIndex = (currentSentenceIndex - sentencesToSkip).coerceAtLeast(0)
         _currentPosition.value = currentSentenceIndex
+        // Adjust elapsed time to match skip
+        adjustElapsedTime(-millis.toLong())
 
         if (_playbackState.value == PlaybackState.PLAYING) {
             if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
             playNextSentence()
         }
+    }
+
+    /** Adjust elapsed time by delta (positive = forward, negative = backward) */
+    private fun adjustElapsedTime(deltaMs: Long) {
+        if (_playbackState.value == PlaybackState.PLAYING) {
+            // Flush current play session into accumulated
+            _elapsedMs += (SystemClock.elapsedRealtime() - _playStartTime)
+            _playStartTime = SystemClock.elapsedRealtime()
+        }
+        _elapsedMs = (_elapsedMs + deltaMs).coerceAtLeast(0L)
+        _elapsedTimeMs.value = _elapsedMs
     }
 
     fun setVoice() {
