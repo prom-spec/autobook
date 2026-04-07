@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.openloud.service.PlaybackState
 import com.openloud.ui.theme.*
 import java.io.File
@@ -49,6 +51,22 @@ fun PlayerScreen(
 
     var showChapters by remember { mutableStateOf(false) }
 
+    // Force refresh position when returning from background.
+    // StateFlow is conflated — if the value hasn't changed while backgrounded,
+    // collectAsState won't recompose.  Bump a counter to invalidate the
+    // wordsRead / progress derivation.
+    var resumeCounter by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                resumeCounter++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(bookId) {
         viewModel.loadBook(bookId)
     }
@@ -64,7 +82,7 @@ fun PlayerScreen(
     val totalMinutes = if (effectiveWPM > 0) totalWords / effectiveWPM else 0f
 
     // Words read so far (chapters before current + position in current chapter)
-    val wordsRead = remember(chapters, currentChapter, currentPosition) {
+    val wordsRead = remember(chapters, currentChapter, currentPosition, resumeCounter) {
         val currentBook = book ?: return@remember 0
         val chapterIndex = currentBook.currentChapterIndex
         var words = 0
