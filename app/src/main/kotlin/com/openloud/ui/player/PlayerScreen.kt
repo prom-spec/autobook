@@ -102,7 +102,14 @@ fun PlayerScreen(
     }
     // Use real elapsed time from the playback service (updated every second)
     val elapsedMinutes = elapsedTimeMs / 60000f
-    val remainingMinutes = (totalMinutes - elapsedMinutes).coerceAtLeast(0f)
+    // Extrapolate total from real playback speed when we have enough data
+    val progress = if (totalWords > 0) wordsRead.toFloat() / totalWords.coerceAtLeast(1) else 0f
+    val estimatedTotalMinutes = if (progress > 0.01f && elapsedMinutes > 0.1f) {
+        elapsedMinutes / progress  // real extrapolation
+    } else {
+        totalMinutes  // fallback to word-count estimate until we have data
+    }
+    val remainingMinutes = (estimatedTotalMinutes - elapsedMinutes).coerceAtLeast(0f)
 
     Scaffold(
         containerColor = Navy,
@@ -282,10 +289,7 @@ fun PlayerScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-                // Progress bar with time
-                val progress = if (totalWords > 0) {
-                    wordsRead.toFloat() / totalWords.coerceAtLeast(1)
-                } else 0f
+                // Progress bar with time (progress computed above from wordsRead/totalWords)
 
                 // Track slider drag separately so we don't hammer seekToProgress
                 var isDragging by remember { mutableStateOf(false) }
@@ -327,7 +331,7 @@ fun PlayerScreen(
                             fontSize = 11.sp
                         )
                         Text(
-                            formatDuration(totalMinutes),
+                            formatDuration(estimatedTotalMinutes),
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             fontSize = 11.sp
