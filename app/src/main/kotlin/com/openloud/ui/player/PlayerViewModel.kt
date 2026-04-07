@@ -144,8 +144,14 @@ class PlayerViewModel(
 
     fun loadBook(bookId: String) {
         viewModelScope.launch {
-            // Save position of the previously loaded book before switching
+            // If this book is already loaded, skip reloading (preserves timer + position)
             val prevBook = _book.value
+            if (prevBook != null && prevBook.id == bookId && _chapters.value.isNotEmpty()) {
+                Log.d(TAG, "Book $bookId already loaded, skipping reload")
+                return@launch
+            }
+
+            // Save position of the previously loaded book before switching
             if (prevBook != null && prevBook.id != bookId) {
                 val sentenceIndex = playbackService?.getCurrentSentenceIndex() ?: 0
                 repository.updateReadPosition(prevBook.id, prevBook.currentChapterIndex, sentenceIndex)
