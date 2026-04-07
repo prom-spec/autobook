@@ -19,6 +19,7 @@ data class BookEntity(
     val currentChapterIndex: Int = 0,
     val currentCharOffset: Int = 0,
     val currentPositionMs: Long = 0,
+    val elapsedPlayTimeMs: Long = 0,  // total real playback time accumulated
     val addedAt: Long = System.currentTimeMillis(),
     val lastReadAt: Long? = null
 )

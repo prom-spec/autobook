@@ -441,6 +441,21 @@ class PlaybackService : MediaBrowserServiceCompat() {
         _elapsedTimeMs.value = 0L
     }
 
+    /** Restore persisted elapsed time when loading a book */
+    fun restoreElapsedTime(ms: Long) {
+        _elapsedMs = ms
+        _elapsedTimeMs.value = ms
+    }
+
+    /** Get accumulated elapsed time (including current play session if active) */
+    fun getAccumulatedElapsedMs(): Long {
+        return if (_playbackState.value == PlaybackState.PLAYING) {
+            _elapsedMs + (SystemClock.elapsedRealtime() - _playStartTime)
+        } else {
+            _elapsedMs
+        }
+    }
+
     private fun startElapsedTicker() {
         elapsedTickerJob?.cancel()
         elapsedTickerJob = serviceScope.launch {

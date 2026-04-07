@@ -151,10 +151,11 @@ class PlayerViewModel(
                 return@launch
             }
 
-            // Save position of the previously loaded book before switching
+            // Save position + elapsed time of the previously loaded book before switching
             if (prevBook != null && prevBook.id != bookId) {
                 val sentenceIndex = playbackService?.getCurrentSentenceIndex() ?: 0
                 repository.updateReadPosition(prevBook.id, prevBook.currentChapterIndex, sentenceIndex)
+                saveElapsedTime(prevBook.id)
             }
 
             val bookEntity = repository.getBook(bookId)
@@ -172,6 +173,9 @@ class PlayerViewModel(
                 val chapter = chapterList.getOrNull(book.currentChapterIndex)
                 _currentChapter.value = chapter
                 Log.d(TAG, "Current chapter: ${chapter?.title}")
+
+                // Restore persisted elapsed play time
+                playbackService?.restoreElapsedTime(book.elapsedPlayTimeMs)
 
                 // Set book info for notification (cover art + title)
                 playbackService?.setBookInfo(book.title, book.coverPath)
@@ -380,6 +384,14 @@ class PlayerViewModel(
             val sentenceIndex = playbackService?.getCurrentSentenceIndex() ?: 0
 
             repository.updateReadPosition(book.id, chapterIndex, sentenceIndex)
+            saveElapsedTime(book.id)
+        }
+    }
+
+    private suspend fun saveElapsedTime(bookId: String) {
+        val elapsed = playbackService?.getAccumulatedElapsedMs() ?: return
+        if (elapsed > 0) {
+            repository.updateElapsedPlayTime(bookId, elapsed)
         }
     }
 

@@ -42,6 +42,10 @@ class BookRepository(
         bookDao.updateReadPosition(bookId, chapterIndex, charOffset, System.currentTimeMillis())
     }
 
+    suspend fun updateElapsedPlayTime(bookId: String, elapsedMs: Long) {
+        bookDao.updateElapsedPlayTime(bookId, elapsedMs)
+    }
+
     fun getChaptersForBook(bookId: String): Flow<List<ChapterEntity>> =
         chapterDao.getChaptersForBook(bookId)
 

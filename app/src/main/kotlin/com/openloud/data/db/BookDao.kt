@@ -40,4 +40,7 @@ interface BookDao {
 
     @Query("UPDATE books SET currentChapterIndex = :chapterIndex, currentCharOffset = :charOffset, lastReadAt = :timestamp WHERE id = :bookId")
     suspend fun updateReadPosition(bookId: String, chapterIndex: Int, charOffset: Int, timestamp: Long)
+
+    @Query("UPDATE books SET elapsedPlayTimeMs = :elapsedMs WHERE id = :bookId")
+    suspend fun updateElapsedPlayTime(bookId: String, elapsedMs: Long)
 }
