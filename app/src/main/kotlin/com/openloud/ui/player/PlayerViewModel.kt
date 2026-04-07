@@ -56,6 +56,9 @@ class PlayerViewModel(
     private val _currentPosition = MutableStateFlow(0)
     val currentPosition: StateFlow<Int> = _currentPosition
 
+    private val _elapsedTimeMs = MutableStateFlow(0L)
+    val elapsedTimeMs: StateFlow<Long> = _elapsedTimeMs
+
     private val _playbackSpeed = MutableStateFlow(
         context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .getFloat(PREF_SPEED, 1.0f)
@@ -116,6 +119,12 @@ class PlayerViewModel(
             viewModelScope.launch {
                 playbackService?.currentPosition?.collect { position ->
                     _currentPosition.value = position
+                }
+            }
+
+            viewModelScope.launch {
+                playbackService?.elapsedTimeMs?.collect { ms ->
+                    _elapsedTimeMs.value = ms
                 }
             }
 

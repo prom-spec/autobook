@@ -34,10 +34,12 @@ import com.openloud.data.db.ChapterEntity
 import com.openloud.domain.chapter.ContentCleaner
 import com.openloud.domain.tts.EdgeTTSEngine
 import com.openloud.domain.tts.SystemTTSEngine
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -117,6 +119,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     private val _currentPosition = MutableStateFlow(0)
     val currentPosition: StateFlow<Int> = _currentPosition
+
+    // Real elapsed playback time in milliseconds (persisted across pause/resume)
+    private var _elapsedMs: Long = 0L
+    private var _playStartTime: Long = 0L   // SystemClock.elapsedRealtime() when play started
+    private val _elapsedTimeMs = MutableStateFlow(0L)
+    val elapsedTimeMs: StateFlow<Long> = _elapsedTimeMs
+    private var elapsedTickerJob: kotlinx.coroutines.Job? = null
 
     inner class PlaybackBinder : Binder() {
         fun getService(): PlaybackService = this@PlaybackService
@@ -379,6 +388,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
             Log.w("PlaybackService", "Failed to acquire audio focus")
         }
 
+        _playStartTime = SystemClock.elapsedRealtime()
+        startElapsedTicker()
+
         _playbackState.value = PlaybackState.PLAYING
         playNextSentence()
         startForeground(NOTIFICATION_ID, createNotification())
@@ -389,6 +401,10 @@ class PlaybackService : MediaBrowserServiceCompat() {
         // Mark as user-initiated pause so AUDIOFOCUS_GAIN won't auto-resume
         pausedByUser = true
         pausedByFocusLoss = false
+        // Accumulate elapsed time
+        _elapsedMs += SystemClock.elapsedRealtime() - _playStartTime
+        _elapsedTimeMs.value = _elapsedMs
+        stopElapsedTicker()
         if (useEdgeTTS) edgeTTS?.pause() else systemTTS.pause()
         _playbackState.value = PlaybackState.PAUSED
         updateMediaSessionState()
@@ -403,11 +419,35 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     fun stop() {
         if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
+        _elapsedMs += SystemClock.elapsedRealtime() - _playStartTime
+        _elapsedTimeMs.value = _elapsedMs
+        stopElapsedTicker()
         _playbackState.value = PlaybackState.IDLE
         // Preserve position so Android Auto / notification can resume from here
         abandonAudioFocus()
         updateMediaSessionState()
         stopForeground(true)
+    }
+
+    /** Reset elapsed time (e.g. when loading a new book / seeking to start) */
+    fun resetElapsedTime() {
+        _elapsedMs = 0L
+        _elapsedTimeMs.value = 0L
+    }
+
+    private fun startElapsedTicker() {
+        elapsedTickerJob?.cancel()
+        elapsedTickerJob = serviceScope.launch {
+            while (true) {
+                delay(1000)
+                _elapsedTimeMs.value = _elapsedMs + (SystemClock.elapsedRealtime() - _playStartTime)
+            }
+        }
+    }
+
+    private fun stopElapsedTicker() {
+        elapsedTickerJob?.cancel()
+        elapsedTickerJob = null
     }
 
     fun skipForward(millis: Int) {

@@ -48,6 +48,7 @@ fun PlayerScreen(
     val skipSeconds by viewModel.skipSeconds.collectAsState()
     val ttsReady by viewModel.ttsReady.collectAsState()
     val volumeBoost by viewModel.volumeBoost.collectAsState()
+    val elapsedTimeMs by viewModel.elapsedTimeMs.collectAsState()
 
     var showChapters by remember { mutableStateOf(false) }
 
@@ -99,7 +100,8 @@ fun PlayerScreen(
         }
         words
     }
-    val elapsedMinutes = if (effectiveWPM > 0) wordsRead / effectiveWPM else 0f
+    // Use real elapsed time from the playback service (updated every second)
+    val elapsedMinutes = elapsedTimeMs / 60000f
     val remainingMinutes = (totalMinutes - elapsedMinutes).coerceAtLeast(0f)
 
     Scaffold(
