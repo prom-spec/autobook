@@ -60,24 +60,39 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private lateinit var audioManager: AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var hasAudioFocus = false
+    private var pausedByUser = false       // true when user tapped pause; prevents auto-resume on AUDIOFOCUS_GAIN
+    private var pausedByFocusLoss = false  // true when we paused due to transient focus loss
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> {
                 hasAudioFocus = true
-                if (_playbackState.value == PlaybackState.PAUSED) resume()
+                // Only auto-resume if WE paused for focus loss, not if the user paused
+                if (pausedByFocusLoss && !pausedByUser && _playbackState.value == PlaybackState.PAUSED) {
+                    pausedByFocusLoss = false
+                    resume()
+                }
             }
             AudioManager.AUDIOFOCUS_LOSS -> {
                 hasAudioFocus = false
-                pause()
+                if (_playbackState.value == PlaybackState.PLAYING) {
+                    pausedByFocusLoss = true
+                    pause()
+                }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 hasAudioFocus = false
-                pause()
+                if (_playbackState.value == PlaybackState.PLAYING) {
+                    pausedByFocusLoss = true
+                    pause()
+                }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 // Could lower volume, but for TTS just pause
                 hasAudioFocus = false
-                pause()
+                if (_playbackState.value == PlaybackState.PLAYING) {
+                    pausedByFocusLoss = true
+                    pause()
+                }
             }
         }
     }
@@ -355,6 +370,10 @@ class PlaybackService : MediaBrowserServiceCompat() {
             return
         }
 
+        // User is actively playing — clear the user-paused flag
+        pausedByUser = false
+        pausedByFocusLoss = false
+
         // Request audio focus
         if (!requestAudioFocus()) {
             Log.w("PlaybackService", "Failed to acquire audio focus")
@@ -367,6 +386,9 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     fun pause() {
+        // Mark as user-initiated pause so AUDIOFOCUS_GAIN won't auto-resume
+        pausedByUser = true
+        pausedByFocusLoss = false
         if (useEdgeTTS) edgeTTS?.pause() else systemTTS.pause()
         _playbackState.value = PlaybackState.PAUSED
         updateMediaSessionState()
