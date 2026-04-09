@@ -310,6 +310,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
             var sentence = sentences[currentSentenceIndex]
             _currentPosition.value = currentSentenceIndex
             updateMediaSessionState() // Update progress bar for Android Auto
+            // Auto-save position every 10 sentences
+            if (currentSentenceIndex % 10 == 0) persistState()
             currentSentenceIndex++
 
             if (sentence == ContentCleaner.PARAGRAPH_BREAK) {
@@ -410,6 +412,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
         _playbackState.value = PlaybackState.PAUSED
         updateMediaSessionState()
         updateNotification()
+        // Persist position + elapsed time to DB
+        persistState()
     }
 
     fun resume() {
@@ -420,11 +424,14 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
     fun stop() {
         if (useEdgeTTS) edgeTTS?.stop() else systemTTS.stop()
-        _elapsedMs += SystemClock.elapsedRealtime() - _playStartTime
-        _elapsedTimeMs.value = _elapsedMs
+        if (_playbackState.value == PlaybackState.PLAYING) {
+            _elapsedMs += SystemClock.elapsedRealtime() - _playStartTime
+            _elapsedTimeMs.value = _elapsedMs
+        }
         stopElapsedTicker()
+        // Persist position + elapsed time to DB before going idle
+        persistState()
         _playbackState.value = PlaybackState.IDLE
-        // Preserve position so Android Auto / notification can resume from here
         abandonAudioFocus()
         updateMediaSessionState()
         stopForeground(true)
@@ -753,6 +760,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
     }
 
     override fun onDestroy() {
+        // Save state synchronously before service dies
+        persistStateBlocking()
         super.onDestroy()
         abandonAudioFocus()
         prefs.unregisterOnSharedPreferenceChangeListener(voiceChangeListener)
@@ -929,6 +938,37 @@ class PlaybackService : MediaBrowserServiceCompat() {
         val chapters = database.chapterDao().getChaptersForBookSync(bookId)
         val chapterIndex = chapters.indexOfFirst { it.id == chapter.id }.takeIf { it >= 0 } ?: return
         database.bookDao().updateReadPosition(bookId, chapterIndex, currentSentenceIndex, System.currentTimeMillis())
+    }
+
+    /** Persist both position and elapsed time to DB */
+    private fun persistState() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                saveCurrentPositionToDb()
+                val bookId = currentChapter?.bookId ?: return@launch
+                database.bookDao().updateElapsedPlayTime(bookId, getAccumulatedElapsedMs())
+            } catch (e: Exception) {
+                Log.e("PlaybackService", "Failed to persist state", e)
+            }
+        }
+    }
+
+    /** Blocking version for onDestroy (serviceScope may be cancelled) */
+    private fun persistStateBlocking() {
+        try {
+            val chapter = currentChapter ?: return
+            val bookId = chapter.bookId
+            // Accumulate final elapsed if still playing
+            if (_playbackState.value == PlaybackState.PLAYING) {
+                _elapsedMs += SystemClock.elapsedRealtime() - _playStartTime
+            }
+            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                saveCurrentPositionToDb()
+                database.bookDao().updateElapsedPlayTime(bookId, _elapsedMs)
+            }
+        } catch (e: Exception) {
+            Log.e("PlaybackService", "Failed to persist state on destroy", e)
+        }
     }
 
     companion object {
