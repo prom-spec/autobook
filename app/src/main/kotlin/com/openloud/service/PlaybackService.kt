@@ -327,8 +327,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
 
             if (useEdgeTTS) {
                 edgeTTS?.speakSentence(sentence, "sentence_$currentSentenceIndex")
-                // Prefetch next non-break sentence for faster playback
-                prefetchNextEdgeSentence()
+                // Prefetch next 3 non-break sentences for gapless playback
+                prefetchNextEdgeSentences(3)
             } else {
                 systemTTS.speakSentence(sentence, "sentence_$currentSentenceIndex")
             }
@@ -339,14 +339,18 @@ class PlaybackService : MediaBrowserServiceCompat() {
         }
     }
 
-    private fun prefetchNextEdgeSentence() {
-        // Look ahead for the next actual sentence (skip paragraph breaks)
+    private fun prefetchNextEdgeSentences(count: Int) {
+        // Collect next N non-break sentences and prefetch them all
+        val upcoming = mutableListOf<String>()
         var idx = currentSentenceIndex
-        while (idx < sentences.size && sentences[idx] == ContentCleaner.PARAGRAPH_BREAK) {
+        while (idx < sentences.size && upcoming.size < count) {
+            if (sentences[idx] != ContentCleaner.PARAGRAPH_BREAK) {
+                upcoming.add(sentences[idx])
+            }
             idx++
         }
-        if (idx < sentences.size) {
-            edgeTTS?.prefetch(sentences[idx])
+        if (upcoming.isNotEmpty()) {
+            edgeTTS?.prefetchBatch(upcoming)
         }
     }
 

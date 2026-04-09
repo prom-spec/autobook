@@ -100,6 +100,9 @@ class EdgeTTSEngine(private val cacheDir: File, private val audioSessionId: Int 
     private var currentJob: Job? = null
     private var prefetchJob: Job? = null
     private var prefetchedAudio: Pair<String, ByteArray>? = null  // text -> audio
+    private val prefetchCache = LinkedHashMap<String, ByteArray>()  // multi-sentence cache
+    private var prefetchBatchJob: Job? = null
+    private val maxPrefetch = 3
     private var isReady = true
     private var clockSkewSeconds: Double = 0.0
     private var retryCount = 0
@@ -125,7 +128,7 @@ class EdgeTTSEngine(private val cacheDir: File, private val audioSessionId: Int 
     fun prefetch(text: String) {
         if (text.isBlank()) return
         // Don't re-prefetch same text
-        if (prefetchedAudio?.first == text) return
+        if (prefetchedAudio?.first == text || prefetchCache.containsKey(text)) return
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
             try {
@@ -142,6 +145,45 @@ class EdgeTTSEngine(private val cacheDir: File, private val audioSessionId: Int 
         }
     }
 
+    /**
+     * Prefetch multiple sentences ahead. Call with the next N sentences.
+     * Synthesizes them sequentially into the cache.
+     */
+    fun prefetchBatch(sentences: List<String>) {
+        prefetchBatchJob?.cancel()
+        prefetchBatchJob = scope.launch {
+            for (text in sentences) {
+                if (text.isBlank()) continue
+                if (prefetchCache.containsKey(text)) continue
+                try {
+                    val audio = synthesize(text)
+                    if (audio != null && audio.isNotEmpty()) {
+                        synchronized(prefetchCache) {
+                            prefetchCache[text] = audio
+                            // Evict oldest if cache too large
+                            while (prefetchCache.size > maxPrefetch * 2) {
+                                val oldest = prefetchCache.keys.first()
+                                prefetchCache.remove(oldest)
+                            }
+                        }
+                        Log.d(TAG, "Batch prefetched ${audio.size}B: ${text.take(30)}...")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Batch prefetch failed for: ${text.take(30)}: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /** Check if audio is available in the prefetch cache */
+    fun getCachedAudio(text: String): ByteArray? {
+        synchronized(prefetchCache) {
+            return prefetchCache.remove(text)
+        }
+    }
+
     fun speakSentence(text: String, utteranceId: String) {
         if (text.isBlank()) {
             listener?.onDone(utteranceId)
@@ -153,9 +195,13 @@ class EdgeTTSEngine(private val cacheDir: File, private val audioSessionId: Int 
             try {
                 listener?.onStart(utteranceId)
 
-                // Check if we already have this audio prefetched
+                // Check if we already have this audio prefetched (single slot or batch cache)
                 val cached = prefetchedAudio
-                val audioBytes = if (cached != null && cached.first == text) {
+                val batchCached = getCachedAudio(text)
+                val audioBytes = if (batchCached != null) {
+                    Log.d(TAG, "Using batch-cached audio for: ${text.take(40)}")
+                    batchCached
+                } else if (cached != null && cached.first == text) {
                     Log.d(TAG, "Using prefetched audio for: ${text.take(40)}")
                     prefetchedAudio = null
                     cached.second
