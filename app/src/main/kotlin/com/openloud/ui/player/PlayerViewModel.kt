@@ -176,6 +176,7 @@ class PlayerViewModel(
 
                 // Restore persisted elapsed play time
                 playbackService?.restoreElapsedTime(book.elapsedPlayTimeMs)
+                _elapsedTimeMs.value = book.elapsedPlayTimeMs
 
                 // Set book info for notification (cover art + title)
                 playbackService?.setBookInfo(book.title, book.coverPath)
